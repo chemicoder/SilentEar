@@ -154,17 +154,17 @@ export const backendIntelligence = {
     return result?.refined || null;
   },
 
-  async discoverTriggers(recentTranscript: string[], existingTriggers: any[]) {
-    const result = await api('/api/intelligence/discover-triggers', { recentTranscript, existingTriggers });
+  async discoverTriggers(recentTranscript: string[], existingTriggers: any[], recentAlerts?: any[]) {
+    const result = await api('/api/intelligence/discover-triggers', { recentTranscript, existingTriggers, recentAlerts });
     return result?.suggestions || [];
   },
 
-  async suggestPhrases(currentText: string): Promise<string[]> {
-    return api('/api/intelligence/voice-suggest', { currentText });
+  async suggestPhrases(currentText: string, sceneContext?: string, recentAlerts?: any[], recentTranscript?: string[]): Promise<string[]> {
+    return api('/api/intelligence/voice-suggest', { currentText, sceneContext, recentAlerts, recentTranscript });
   },
 
-  async predictCompletion(currentText: string): Promise<string> {
-    const result = await api('/api/intelligence/voice-complete', { currentText });
+  async predictCompletion(currentText: string, sceneContext?: string): Promise<string> {
+    const result = await api('/api/intelligence/voice-complete', { currentText, sceneContext });
     return result?.completion || '';
   },
 };

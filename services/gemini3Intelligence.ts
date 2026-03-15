@@ -1,14 +1,16 @@
 /**
  * Gemini 3 Intelligence Layer for SilentEar
  * 
- * Uses Gemini 3 Flash (gemini-3-flash-preview) with thinking_level control for:
+ * Uses backend REST endpoints (Cloud Run) as primary path, with client-side
+ * Gemini SDK as fallback. This ensures the API key stays server-side.
+ *
+ * Features:
  * 1. Scene Intelligence — Multi-event reasoning to understand situational context
  * 2. Smart Transcript Refinement — Cleans noisy speech fragments into coherent English
  * 3. AI Trigger Auto-Discovery — Suggests new trigger words from conversation patterns
- *
- * All functions use thinking_level: "low" for minimal latency in a real-time accessibility app.
  */
 
+import { backendIntelligence, isBackendAvailable } from './backendClient';
 import { getAiClient, handleAiError, AI_CONFIG } from '../shared/index';
 import { TriggerWord, AlertState } from '../types';
 
@@ -24,6 +26,15 @@ interface SceneAnalysis {
 
 let lastSceneAnalysisTime = 0;
 const SCENE_ANALYSIS_COOLDOWN = 10000; // Don't analyze more than once per 10s
+let _backendAvailable: boolean | null = null;
+
+const checkBackend = async (): Promise<boolean> => {
+  if (_backendAvailable !== null) return _backendAvailable;
+  _backendAvailable = await isBackendAvailable();
+  // Re-check every 60s
+  setTimeout(() => { _backendAvailable = null; }, 60000);
+  return _backendAvailable;
+};
 
 export const analyzeScene = async (
   recentAlerts: AlertState[],
@@ -37,6 +48,17 @@ export const analyzeScene = async (
   lastSceneAnalysisTime = now;
 
   try {
+    // Try backend REST endpoint first (keeps API key server-side)
+    if (await checkBackend()) {
+      const result = await backendIntelligence.analyzeScene(recentAlerts, recentTranscript, userName);
+      if (result && result.summary) return result as SceneAnalysis;
+    }
+  } catch (e) {
+    console.warn('[Gemini3] Backend scene analysis failed, trying client-side:', e);
+  }
+
+  // Fallback to client-side
+  try {
     return await handleAiError(async () => {
       const ai = getAiClient();
 
@@ -45,17 +67,17 @@ export const analyzeScene = async (
       ).join('\n');
 
       const transcriptText = recentTranscript.slice(-20).join(' ');
+      const alertCount = recentAlerts.length;
 
-      const prompt = `You are SilentEar AI, an accessibility assistant for a deaf user named "${userName}".
+      const prompt = `You are SilentEar AI, an environmental awareness assistant for a deaf user named "${userName}".
+Think like a hearing person describing the scene to a deaf friend.
 
-Recent detected alerts:
-${alertSummary || 'None'}
+RECENT ALERTS: ${alertSummary || '(none)'}
+RECENT SPEECH: ${transcriptText || '(quiet)'}
+Alert count: ${alertCount}
 
-Recent transcript of surrounding audio:
-${transcriptText || 'No speech detected'}
-
-Analyze the scene. Respond ONLY with valid JSON (no markdown, no code fences):
-{"summary": "1-sentence description of what's happening around the user", "urgency": "low|medium|high|critical", "suggestion": "optional 1-sentence actionable advice"}`;
+Describe what's happening around the user in one natural sentence. Assess urgency (low/medium/high/critical). Give advice only if action needed.
+Respond with JSON: {"summary": "...", "urgency": "...", "suggestion": "...or null"}`;
 
       const result = await ai.models.generateContent({
         model: AI_CONFIG.GEMINI_MODEL,
@@ -67,8 +89,7 @@ Analyze the scene. Respond ONLY with valid JSON (no markdown, no code fences):
       });
 
       const text = typeof result?.text === 'string' ? result.text : '';
-      const parsed = JSON.parse(text);
-      return parsed as SceneAnalysis;
+      return JSON.parse(text) as SceneAnalysis;
     });
   } catch (e) {
     console.warn('[Gemini3] Scene analysis failed:', e);
@@ -101,6 +122,17 @@ export const refineTranscript = async (): Promise<string | null> => {
   const fragments = [...pendingFragments];
   pendingFragments = []; // Clear processed fragments
 
+  try {
+    // Try backend REST endpoint first
+    if (await checkBackend()) {
+      const result = await backendIntelligence.refineTranscript(fragments);
+      if (result) return result;
+    }
+  } catch (e) {
+    console.warn('[Gemini3] Backend refinement failed, trying client-side:', e);
+  }
+
+  // Fallback to client-side
   try {
     return await handleAiError(async () => {
       const ai = getAiClient();
@@ -156,6 +188,17 @@ export const discoverNewTriggers = async (
 
   lastDiscoveryTime = now;
 
+  try {
+    // Try backend REST endpoint first
+    if (await checkBackend()) {
+      const result = await backendIntelligence.discoverTriggers(recentTranscript, existingTriggers);
+      if (Array.isArray(result) && result.length > 0) return result as TriggerSuggestion[];
+    }
+  } catch (e) {
+    console.warn('[Gemini3] Backend trigger discovery failed, trying client-side:', e);
+  }
+
+  // Fallback to client-side
   try {
     return await handleAiError(async () => {
       const ai = getAiClient();

@@ -855,6 +855,8 @@ Respond ONLY with tool calls. No spoken responses. Transcribe everything.`;
           <VoiceDeck
             onBack={() => { hapticFeedback(30); setRoute(AppRoute.HOME); }}
             context={sceneAnalysis?.summary || refinedTranscript || transcript}
+            recentAlerts={history.slice(0, 5)}
+            recentTranscript={fullTranscriptLog.slice(-10)}
           />
         </VoiceDeckErrorBoundary>
       );

@@ -16,21 +16,24 @@ import {
   Mic2,
   Trash2
 } from 'lucide-react';
-import { voiceDeckService } from '../services/voiceDeckService';
+import { backendIntelligence } from '../services/backendClient';
 
 interface VoiceDeckProps {
   onBack: () => void;
   context?: string;
+  recentAlerts?: any[];
+  recentTranscript?: string[];
 }
 
 const QUICK_PHRASES = [
   "Hello", "Yes", "No", "Thank you",
   "I am deaf", "Please repeat",
-  "Write it down?", "I need help",
-  "Where's the exit?"
+  "Can you write it down?", "I need help",
+  "One moment please", "Excuse me",
+  "Where's the exit?", "I understand"
 ];
 
-export const VoiceDeck: React.FC<VoiceDeckProps> = ({ onBack, context }) => {
+export const VoiceDeck: React.FC<VoiceDeckProps> = ({ onBack, context, recentAlerts, recentTranscript }) => {
   const [text, setText] = useState('');
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isFlipped, setIsFlipped] = useState(false);
@@ -88,17 +91,24 @@ export const VoiceDeck: React.FC<VoiceDeckProps> = ({ onBack, context }) => {
     timeoutRef.current = setTimeout(async () => {
       try {
         setIsGenerating(true);
-        const suggestions = await voiceDeckService.suggestPhrases(text || context || '');
-        setSmartSuggestions(suggestions);
+        const suggestions = await backendIntelligence.suggestPhrases(
+          text || '',
+          context,
+          recentAlerts,
+          recentTranscript
+        );
+        if (Array.isArray(suggestions) && suggestions.length > 0) {
+          setSmartSuggestions(suggestions);
+        }
       } catch (e) {
         console.warn('Smart suggestions failed:', e);
       } finally {
         setIsGenerating(false);
       }
-    }, 1500);
+    }, 1200);
 
     return () => clearTimeout(timeoutRef.current);
-  }, [text, context]);
+  }, [text, context, recentAlerts, recentTranscript]);
 
   const speak = (phrase: string) => {
     if (!synth) return;
@@ -127,9 +137,13 @@ export const VoiceDeck: React.FC<VoiceDeckProps> = ({ onBack, context }) => {
   const handleSmartComplete = async () => {
     if (!text.trim()) return;
     setIsGenerating(true);
-    const completion = await voiceDeckService.predictCompletion(text);
-    if (completion) {
-      setText(prev => prev.trim() + ' ' + completion);
+    try {
+      const completion = await backendIntelligence.predictCompletion(text, context);
+      if (completion) {
+        setText(prev => prev.trim() + ' ' + completion);
+      }
+    } catch (e) {
+      console.warn('Smart completion failed:', e);
     }
     setIsGenerating(false);
   };

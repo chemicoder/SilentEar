@@ -32,17 +32,31 @@ router.post('/scene', async (req: Request, res: Response) => {
     ).join('\n');
 
     const transcriptText = (recentTranscript || []).slice(-20).join(' ');
+    const alertCount = (recentAlerts || []).length;
+    const hasMultipleSpeakers = transcriptText.length > 100;
 
-    const prompt = `You are SilentEar AI, an accessibility assistant for a deaf user named "${userName}".
+    const prompt = `You are SilentEar AI, an advanced environmental awareness assistant for a deaf user named "${userName || 'User'}".
 
-Recent detected alerts:
-${alertSummary || 'None'}
+You must infer what is physically happening around the user by combining audio alerts and speech transcript data. Think like a hearing person describing the scene to a deaf friend.
 
-Recent transcript of surrounding audio:
-${transcriptText || 'No speech detected'}
+RECENT ALERTS (sound events detected by the system):
+${alertSummary || '(No sound alerts detected recently)'}
 
-Analyze the scene. Respond ONLY with valid JSON (no markdown, no code fences):
-{"summary": "1-sentence description of what's happening around the user", "urgency": "low|medium|high|critical", "suggestion": "optional 1-sentence actionable advice"}`;
+RECENT SPEECH TRANSCRIPT (ambient audio converted to text):
+${transcriptText || '(No speech detected recently)'}
+
+ENVIRONMENTAL CLUES:
+- Number of alerts in last minute: ${alertCount}
+- Speech volume/activity: ${hasMultipleSpeakers ? 'Active conversation detected' : transcriptText ? 'Some speech detected' : 'Quiet environment'}
+
+INSTRUCTIONS:
+1. Describe what is happening around the user in a natural, clear sentence — as if you are their hearing friend explaining the scene.
+2. Assess urgency based on safety and importance: "low" = ambient noise, "medium" = someone talking to/about them, "high" = something needing attention (doorbell, name called), "critical" = safety hazard (alarm, siren, glass breaking).
+3. Give a short, practical suggestion ONLY if the user should take action.
+4. Do NOT say "no sound detected" — if data is sparse, infer the most likely scenario (e.g., "It's quiet around you" or "Background noise from a TV or radio").
+
+Respond with JSON:
+{"summary": "...", "urgency": "low|medium|high|critical", "suggestion": "...or null if no action needed"}`;
 
     const result = await ai.models.generateContent({
       model: GEMINI_MODEL,
@@ -70,14 +84,22 @@ router.post('/refine', async (req: Request, res: Response) => {
     }
 
     const ai = getAi();
-    const prompt = `You are an intelligent speech-to-text post-processor for a deaf accessibility app.
+    const prompt = `You are an expert speech-to-text post-processor for SilentEar, a real-time accessibility app for deaf users.
 
-These are raw speech recognition fragments captured from ambient audio (may be noisy, choppy, repeated, or partial):
+RAW FRAGMENTS (captured from ambient audio — may be noisy, overlapping, partial, or repeated):
 ${fragments.map((f: string, i: number) => `${i + 1}. "${f}"`).join('\n')}
 
-Reconstruct these into clean, coherent English sentences. Fix grammar, remove duplicates, and fill obvious gaps. Keep all meaningful content. Be concise.
+INSTRUCTIONS:
+1. Reconstruct these fragments into clean, natural English sentences.
+2. Merge overlapping/repeated phrases into single coherent statements.
+3. Fix grammar, spelling, and obvious misrecognitions (e.g., "fire alarm" not "fire a larm").
+4. Separate different speakers or topics with line breaks.
+5. Preserve names, numbers, and important details exactly.
+6. If someone seems to be addressing the deaf user directly, mark it with → at the start.
+7. Remove filler words (um, uh, like) unless they carry meaning.
+8. Keep the output concise — the user reads this on a phone screen.
 
-Respond with ONLY the refined text (no quotes, no explanation).`;
+OUTPUT: Clean text only, no quotes or explanation. Use line breaks between distinct statements.`;
 
     const result = await ai.models.generateContent({
       model: GEMINI_MODEL,
@@ -98,7 +120,7 @@ Respond with ONLY the refined text (no quotes, no explanation).`;
 // ── AI Trigger Auto-Discovery ──
 router.post('/discover-triggers', async (req: Request, res: Response) => {
   try {
-    const { recentTranscript, existingTriggers } = req.body;
+    const { recentTranscript, existingTriggers, recentAlerts } = req.body;
     if (!recentTranscript || recentTranscript.length < 5) {
       return res.json({ suggestions: [] });
     }
@@ -106,19 +128,27 @@ router.post('/discover-triggers', async (req: Request, res: Response) => {
     const ai = getAi();
     const existingWords = (existingTriggers || []).map((t: any) => t.word).join(', ');
     const transcriptText = recentTranscript.slice(-30).join(' ');
+    const alertLabels = (recentAlerts || []).slice(0, 5).map((a: any) => a.trigger?.label || '').filter(Boolean).join(', ');
 
-    const prompt = `You are SilentEar AI helping a deaf user stay aware of their environment.
+    const prompt = `You are SilentEar AI helping a deaf user stay safe and aware of their environment.
 
-Current trigger words: ${existingWords}
+The user currently monitors these trigger words: ${existingWords || '(none set)'}
 
-Recent audio transcript:
+Recent audio transcript from their environment:
 "${transcriptText}"
 
-Suggest 1-3 NEW important words/sounds to add. Only suggest frequent or safety-relevant words not already in the list.
+Recent alert activity: ${alertLabels || 'None'}
 
-Respond ONLY with valid JSON array:
-[{"word": "example", "reason": "heard frequently", "urgency": "low|medium|high"}]
-If no suggestions: []`;
+INSTRUCTIONS:
+1. Analyze the transcript for recurring words, names, sounds, or safety-relevant terms NOT already in the user's trigger list.
+2. Prioritize: safety sounds (alarms, horns, sirens), names of people speaking, frequently repeated words, and contextually important terms.
+3. Only suggest words that would genuinely help a deaf person stay aware. No generic words like "the", "and", etc.
+4. For each suggestion, explain WHY it matters in the context of what was heard.
+5. Set urgency: "high" = safety-critical sounds, "medium" = names/important recurring words, "low" = nice-to-have awareness.
+
+Respond with JSON array (1-3 items max):
+[{"word": "specific_word", "reason": "why this matters for the deaf user", "urgency": "low|medium|high"}]
+Empty array [] if nothing useful to suggest.`;
 
     const result = await ai.models.generateContent({
       model: GEMINI_MODEL,
@@ -140,12 +170,40 @@ If no suggestions: []`;
 // ── Voice Deck: Smart Phrase Suggestions ──
 router.post('/voice-suggest', async (req: Request, res: Response) => {
   try {
-    const { currentText } = req.body;
+    const { currentText, sceneContext, recentAlerts, recentTranscript } = req.body;
     const ai = getAi();
 
-    const prompt = `You are an AI assistant for a non-verbal person using a Text-to-Speech app.
-Based on the current text: "${currentText}", suggest 3 relevant, concise, and helpful phrases they might want to say next.
-Return ONLY a JSON array of 3 strings.`;
+    const alertContext = (recentAlerts || []).slice(0, 5).map((a: any) =>
+      `${a.trigger?.label}: "${a.detectedText || ''}"`
+    ).join(', ');
+
+    const transcriptSnippet = (recentTranscript || []).slice(-5).join(' ');
+
+    const prompt = `You are the Voice Deck AI for SilentEar — a communication tool for a deaf/non-verbal person.
+
+CURRENT SITUATION:
+- Scene: ${sceneContext || 'Unknown environment'}
+- Recent sounds detected: ${alertContext || 'None'}
+- Recent speech around the user: ${transcriptSnippet || 'None'}
+- User is typing: "${currentText || '(nothing yet)'}"
+
+YOUR JOB: Suggest 4-5 short, practical phrases the user might want to SAY RIGHT NOW given the situation.
+
+RULES:
+1. Phrases must be things a deaf person would actually say out loud via text-to-speech.
+2. Match the scenario — if someone is talking to them, suggest responses. If a doorbell rang, suggest door-related phrases. If it's quiet, suggest conversation starters.
+3. Keep phrases under 8 words each. Natural and polite.
+4. If the user is typing something, suggest completions or related phrases.
+5. Include at least one safety/clarification phrase if the situation is unclear.
+6. Do NOT suggest generic greetings if the context implies an active conversation.
+
+EXAMPLES by scenario:
+- Doorbell rang → ["I'm coming!", "Who is it?", "Please wait a moment", "Leave it at the door"]
+- Someone calling name → ["Yes, I'm here", "I can see you", "One moment please", "What do you need?"]
+- Active conversation → ["Can you repeat that?", "I agree", "Tell me more", "I understand"]
+- Restaurant → ["Can I see the menu?", "Water please", "The check please", "Thank you"]
+
+Return ONLY a JSON array of strings.`;
 
     const result = await ai.models.generateContent({
       model: GEMINI_MODEL,
@@ -170,12 +228,17 @@ Return ONLY a JSON array of 3 strings.`;
 // ── Voice Deck: Sentence Completion ──
 router.post('/voice-complete', async (req: Request, res: Response) => {
   try {
-    const { currentText } = req.body;
+    const { currentText, sceneContext } = req.body;
     if (!currentText?.trim()) return res.json({ completion: '' });
 
     const ai = getAi();
-    const prompt = `Complete this sentence naturally and concisely: "${currentText}". 
-Return ONLY the remaining part of the sentence.`;
+    const prompt = `You are helping a deaf person complete a sentence they are typing to speak aloud via text-to-speech.
+
+Scene context: ${sceneContext || 'Unknown'}
+Partial sentence: "${currentText}"
+
+Complete the sentence naturally and concisely. The completion should make sense for a deaf person communicating with hearing people.
+Return ONLY the remaining words to complete the sentence (not the full sentence).`;
 
     const result = await ai.models.generateContent({
       model: GEMINI_MODEL,
