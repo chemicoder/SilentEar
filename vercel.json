@@ -1,0 +1,9 @@
+{
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "rewrites": [
+    { "source": "/signmoji", "destination": "/signmoji/index.html" },
+    { "source": "/signmoji/(.*)", "destination": "/signmoji/index.html" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}

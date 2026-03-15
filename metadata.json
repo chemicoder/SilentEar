@@ -1,0 +1,7 @@
+{
+  "name": "SilentEar - Visual & Haptic Assist v3",
+  "description": "An assistive app for the deaf and hard of hearing that converts ambient sounds/speech into haptic vibrations and visual alerts for specific keywords like names, 'water', or 'emergency'.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}

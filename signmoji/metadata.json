@@ -1,0 +1,8 @@
+{
+  "name": "SignMoji AI video",
+  "description": "An intelligent converter that turns sign language videos into a library of categorized, animated emojis with semantic AI overlays.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
