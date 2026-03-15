@@ -145,6 +145,7 @@ Real-time alerts need to be *instant* (under 500ms). Scene analysis needs to be 
 
 SilentEar is open source:
 - **GitHub**: [github.com/chemicoder/SilentEar](https://github.com/chemicoder/SilentEar)
+- **Android APK**: [Download SilentEar APK](https://github.com/chemicoder/SilentEar/raw/main/SilentEar-debug.apk) (debug build, ~5.5MB)
 - **Live Demo**: Deployed on Google Cloud Run
 
 Built with React 19, TypeScript, Node.js, and the Google GenAI SDK (`@google/genai`).
